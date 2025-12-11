@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS credit_purchases (
     stripe_session_id TEXT UNIQUE NOT NULL,
     stripe_payment_intent TEXT,
     email TEXT,
+    user_id UUID REFERENCES auth.users(id),
     credits_purchased INTEGER NOT NULL,
     amount_paid DECIMAL(10, 2) NOT NULL,
     currency TEXT DEFAULT 'usd',
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS credit_purchases (
 
 -- Create index for faster lookups
 CREATE INDEX IF NOT EXISTS idx_credit_purchases_email ON credit_purchases(email);
+CREATE INDEX IF NOT EXISTS idx_credit_purchases_user_id ON credit_purchases(user_id);
 CREATE INDEX IF NOT EXISTS idx_credit_purchases_stripe_session ON credit_purchases(stripe_session_id);
 CREATE INDEX IF NOT EXISTS idx_credit_purchases_created_at ON credit_purchases(created_at DESC);
 
@@ -48,4 +50,7 @@ CREATE TRIGGER trigger_credit_purchases_updated_at
     BEFORE UPDATE ON credit_purchases
     FOR EACH ROW
     EXECUTE FUNCTION update_credit_purchases_updated_at();
+
+
+
 

@@ -5,85 +5,157 @@ import { useState, Suspense } from "react";
 
 const CREDITS_PER_IMAGE = 8;
 
-// Pricing tiers - price per credit decreases with volume
-const PRICING_TIERS = [
-  {
-    credits: 40,
-    price: 4.99,
-    perCredit: 0.125,
-    label: "5 Swaps",
-    popular: false,
-  },
-  {
-    credits: 80,
-    price: 7.99,
-    perCredit: 0.1,
-    label: "10 Swaps",
-    popular: true,
-  },
-  {
-    credits: 200,
-    price: 14.99,
-    perCredit: 0.075,
-    label: "25 Swaps",
-    popular: false,
-  },
-  {
-    credits: 400,
-    price: 24.99,
-    perCredit: 0.0625,
-    label: "50 Swaps",
-    popular: false,
-  },
+// Standalone credit packages
+const CREDIT_PACKAGES = [
+  { credits: 80, price: 4.99, swaps: 10 },
+  { credits: 400, price: 19.99, swaps: 50 },
+  { credits: 1600, price: 49.99, swaps: 200 },
 ];
+
+// Subscription plans
+const SUBSCRIPTION_PLANS = {
+  monthly: [
+    {
+      id: "basic",
+      name: "Basic Plan",
+      price: 7.99,
+      description: "Perfect for casual users",
+      features: [
+        { text: "320 credits/month", bold: false },
+        { text: "40", bold: true, suffix: " swaps" },
+        { text: "10GB storage", bold: false },
+        { text: "HD quality exports", bold: false },
+        { text: "Email support first 30 days", bold: true },
+      ],
+      popular: false,
+    },
+    {
+      id: "pro",
+      name: "Popular Plan",
+      price: 13.99,
+      description: "Perfect for creators & professionals",
+      features: [
+        { text: "1,800 credits/month", bold: false },
+        { text: "225", bold: true, suffix: " swaps" },
+        { text: "25GB storage", bold: false },
+        { text: "4K quality exports", bold: false },
+        { text: "Email support 24/7", bold: true, suffix: " priority" },
+      ],
+      popular: true,
+    },
+    {
+      id: "ultra",
+      name: "Pro Plan",
+      price: 29.99,
+      description: "Perfect for power users",
+      features: [
+        { text: "Unlimited credits", bold: false },
+        { text: "Unlimited", bold: true, suffix: " swaps" },
+        { text: "100GB storage", bold: false },
+        { text: "4K quality exports", bold: false },
+        { text: "Email support 24/7", bold: true, suffix: " priority" },
+      ],
+      popular: false,
+    },
+  ],
+  yearly: [
+    {
+      id: "basic",
+      name: "Basic Plan",
+      price: 79.99,
+      monthlyEquivalent: 6.67,
+      description: "Perfect for casual users",
+      features: [
+        { text: "320 credits/month", bold: false },
+        { text: "40", bold: true, suffix: " swaps" },
+        { text: "10GB storage", bold: false },
+        { text: "HD quality exports", bold: false },
+        { text: "Email support first 30 days", bold: true },
+      ],
+      popular: false,
+    },
+    {
+      id: "pro",
+      name: "Popular Plan",
+      price: 139.99,
+      monthlyEquivalent: 11.67,
+      description: "Perfect for creators & professionals",
+      features: [
+        { text: "1,800 credits/month", bold: false },
+        { text: "225", bold: true, suffix: " swaps" },
+        { text: "25GB storage", bold: false },
+        { text: "4K quality exports", bold: false },
+        { text: "Email support 24/7", bold: true, suffix: " priority" },
+      ],
+      popular: true,
+    },
+    {
+      id: "ultra",
+      name: "Pro Plan",
+      price: 299.99,
+      monthlyEquivalent: 25.0,
+      description: "Perfect for power users",
+      features: [
+        { text: "Unlimited credits", bold: false },
+        { text: "Unlimited", bold: true, suffix: " swaps" },
+        { text: "100GB storage", bold: false },
+        { text: "4K quality exports", bold: false },
+        { text: "Email support 24/7", bold: true, suffix: " priority" },
+      ],
+      popular: false,
+    },
+  ],
+};
+
+function CheckIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      className={`w-5 h-5 shrink-0 ${className}`}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
+      <path
+        d="M8 12l2.5 2.5L16 9"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function PaymentContent() {
   const searchParams = useSearchParams();
   const neededCredits = parseInt(searchParams.get("needed") || "0", 10);
   const returnUrl =
     searchParams.get("return") || "https://onlyfaceswap.com/basket";
+  const userId = searchParams.get("user_id") || "";
 
-  const [selectedTier, setSelectedTier] = useState<number | null>(() => {
-    // Auto-select the best tier based on needed credits
-    if (neededCredits > 0) {
-      for (let i = PRICING_TIERS.length - 1; i >= 0; i--) {
-        if (PRICING_TIERS[i].credits >= neededCredits) {
-          // Find the smallest package that covers the need
-          let bestIndex = i;
-          for (let j = 0; j <= i; j++) {
-            if (PRICING_TIERS[j].credits >= neededCredits) {
-              bestIndex = j;
-              break;
-            }
-          }
-          return bestIndex;
-        }
-      }
-      return PRICING_TIERS.length - 1; // Largest if none covers
-    }
-    return 1; // Default to popular tier
-  });
-
-  const [isLoading, setIsLoading] = useState(false);
+  const [billingPeriod, setBillingPeriod] = useState<"monthly" | "yearly">(
+    "monthly"
+  );
+  const [isLoading, setIsLoading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const neededSwaps = Math.ceil(neededCredits / CREDITS_PER_IMAGE);
+  const plans = SUBSCRIPTION_PLANS[billingPeriod];
 
-  const handlePurchase = async () => {
-    if (selectedTier === null) return;
-
-    setIsLoading(true);
+  const handlePurchaseCredits = async (packageIndex: number) => {
+    setIsLoading(packageIndex);
     setError(null);
 
     try {
-      const tier = PRICING_TIERS[selectedTier];
+      const pkg = CREDIT_PACKAGES[packageIndex];
       const response = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          credits: tier.credits,
-          price: tier.price,
+          credits: pkg.credits,
+          price: pkg.price,
           returnUrl,
+          userId,
         }),
       });
 
@@ -93,191 +165,423 @@ function PaymentContent() {
         throw new Error(data.error || "Failed to create checkout session");
       }
 
-      // Redirect to Stripe Checkout
-      window.location.href = data.url;
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error("No checkout URL returned");
+      }
     } catch (err) {
+      console.error("Checkout error:", err);
       setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setIsLoading(false);
+      setIsLoading(null);
     }
   };
 
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 md:p-8">
-      {/* Logo */}
-      <div className="mb-8 text-center">
-        <h1 className="text-3xl font-bold text-white mb-2">
-          <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-            Visagify
-          </span>
-        </h1>
-        <p className="text-gray-400 text-sm">AI Face Swapping Credits</p>
-      </div>
+  const handleSubscribe = async () => {
+    setError(null);
+    // For now, redirect to credits purchase as subscription is coming soon
+    alert(`Subscription plans coming soon! For now, purchase credit packages above.`);
+  };
 
-      {/* Info Banner */}
-      {neededCredits > 0 && (
-        <div className="w-full max-w-2xl mb-6 p-4 rounded-lg bg-purple-500/20 border border-purple-500/30">
-          <p className="text-center text-white">
-            You need{" "}
-            <span className="font-bold text-purple-300">
-              {neededCredits} credits
-            </span>{" "}
-            ({neededSwaps} swap{neededSwaps !== 1 ? "s" : ""}) to complete your
-            basket
+  return (
+    <div 
+      className="min-h-screen py-16 px-4 relative overflow-hidden"
+      style={{
+        background: 'linear-gradient(180deg, #0c0118 0%, #130824 50%, #0a0a14 100%)',
+      }}
+    >
+      {/* Decorative gradient orbs */}
+      <div 
+        className="absolute top-0 left-1/4 w-[600px] h-[600px] rounded-full opacity-20 blur-[120px] pointer-events-none"
+        style={{ background: 'radial-gradient(circle, #a855f7 0%, transparent 70%)' }}
+      />
+      <div 
+        className="absolute bottom-0 right-1/4 w-[500px] h-[500px] rounded-full opacity-15 blur-[100px] pointer-events-none"
+        style={{ background: 'radial-gradient(circle, #ec4899 0%, transparent 70%)' }}
+      />
+      
+      <div className="max-w-7xl mx-auto relative z-10">
+        {/* Header */}
+        <div className="text-center mb-16">
+          <h1 
+            className="text-4xl md:text-6xl font-light text-white mb-4"
+            style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic' }}
+          >
+            Simple, straightforward pricing
+          </h1>
+          <p className="text-gray-400 text-lg">
+            Join professionals who use Visagify to transform their content
           </p>
         </div>
-      )}
 
-      {/* Pricing Cards */}
-      <div className="w-full max-w-4xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {PRICING_TIERS.map((tier, index) => {
-          const isSelected = selectedTier === index;
-          const swaps = tier.credits / CREDITS_PER_IMAGE;
-          const coversNeed = tier.credits >= neededCredits;
-
-          return (
-            <button
-              key={tier.credits}
-              onClick={() => setSelectedTier(index)}
-              className={`
-                relative p-6 rounded-xl border-2 transition-all duration-200
-                ${
-                  isSelected
-                    ? "border-purple-500 bg-purple-500/20 scale-105"
-                    : "border-gray-700 bg-gray-800/50 hover:border-gray-600"
-                }
-                ${!coversNeed && neededCredits > 0 ? "opacity-50" : ""}
-              `}
-            >
-              {tier.popular && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full text-xs font-bold text-white">
-                  POPULAR
-                </div>
-              )}
-
-              {neededCredits > 0 && coversNeed && (
-                <div className="absolute -top-3 right-2 px-2 py-1 bg-green-500/80 rounded-full text-xs font-bold text-white">
-                  ✓ Covers
-                </div>
-              )}
-
-              <div className="text-center">
-                <div className="text-3xl font-bold text-white mb-1">
-                  ${tier.price}
-                </div>
-                <div className="text-gray-400 text-sm mb-4">{tier.label}</div>
-
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between text-gray-300">
-                    <span>Credits:</span>
-                    <span className="font-medium">{tier.credits}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-300">
-                    <span>Swaps:</span>
-                    <span className="font-medium">{swaps}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Per swap:</span>
-                    <span className="font-medium">
-                      ${(tier.price / swaps).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {isSelected && (
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-4 bg-purple-500 rotate-45" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Purchase Button */}
-      <div className="mt-8 w-full max-w-md">
-        {error && (
-          <div className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/30 text-red-300 text-sm text-center">
-            {error}
+        {/* Info Banner */}
+        {neededCredits > 0 && (
+          <div 
+            className="max-w-2xl mx-auto mb-12 p-5 rounded-2xl backdrop-blur-sm"
+            style={{
+              background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(236, 72, 153, 0.15) 100%)',
+              border: '1px solid rgba(168, 85, 247, 0.3)',
+              boxShadow: '0 8px 32px rgba(168, 85, 247, 0.1)',
+            }}
+          >
+            <p className="text-center text-white text-lg">
+              You need{" "}
+              <span className="font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+                {neededCredits} credits
+              </span>{" "}
+              ({neededSwaps} swap{neededSwaps !== 1 ? "s" : ""}) to complete your basket
+            </p>
           </div>
         )}
 
-        <button
-          onClick={handlePurchase}
-          disabled={selectedTier === null || isLoading}
-          className={`
-            w-full py-4 px-6 rounded-xl font-bold text-lg transition-all
-            ${
-              selectedTier !== null && !isLoading
-                ? "bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white shadow-lg shadow-purple-500/25"
-                : "bg-gray-700 text-gray-400 cursor-not-allowed"
-            }
-          `}
-        >
-          {isLoading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-              Processing...
-            </span>
-          ) : selectedTier !== null ? (
-            `Buy ${PRICING_TIERS[selectedTier].credits} Credits for $${PRICING_TIERS[selectedTier].price}`
-          ) : (
-            "Select a package"
-          )}
-        </button>
+        {/* ==================== CREDIT PACKAGES ==================== */}
+        <div className="mb-20">
+          <div className="text-center mb-10">
+            <h2 className="text-2xl md:text-3xl font-semibold text-white mb-2">
+              Buy Credits
+            </h2>
+            <p className="text-gray-400">One-time purchase, never expires</p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+            {CREDIT_PACKAGES.map((pkg, index) => {
+              const coversNeed = pkg.credits >= neededCredits;
+              const isPopular = index === 1;
+              
+              return (
+                <div
+                  key={pkg.credits}
+                  className={`relative rounded-3xl p-[1px] transition-all duration-300 hover:scale-[1.02] ${
+                    !coversNeed && neededCredits > 0 ? "opacity-50" : ""
+                  }`}
+                  style={{
+                    background: isPopular 
+                      ? 'linear-gradient(180deg, rgba(168, 85, 247, 0.5) 0%, rgba(236, 72, 153, 0.5) 100%)'
+                      : 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+                  }}
+                >
+                  {/* Card Inner */}
+                  <div 
+                    className="rounded-3xl p-6 h-full"
+                    style={{
+                      background: isPopular
+                        ? 'linear-gradient(180deg, rgba(30, 15, 50, 0.95) 0%, rgba(20, 10, 35, 0.98) 100%)'
+                        : 'linear-gradient(180deg, rgba(25, 20, 40, 0.9) 0%, rgba(15, 12, 25, 0.95) 100%)',
+                      boxShadow: isPopular 
+                        ? '0 20px 60px rgba(168, 85, 247, 0.3), inset 0 1px 0 rgba(255,255,255,0.1)'
+                        : '0 10px 40px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05)',
+                    }}
+                  >
+                    {/* Popular Badge */}
+                    {isPopular && (
+                      <div 
+                        className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full text-xs font-semibold text-white"
+                        style={{
+                          background: 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)',
+                          boxShadow: '0 4px 15px rgba(168, 85, 247, 0.4)',
+                        }}
+                      >
+                        Popular
+                      </div>
+                    )}
 
-        <p className="mt-4 text-center text-gray-500 text-xs">
-          Secure payment powered by Stripe. Credits never expire.
-        </p>
-      </div>
+                    {/* Covers Need Badge */}
+                    {neededCredits > 0 && coversNeed && (
+                      <div className="absolute -top-3 right-4 px-3 py-1 bg-emerald-500 rounded-full text-xs font-bold text-white shadow-lg">
+                        ✓ Covers
+                      </div>
+                    )}
 
-      {/* Security badges */}
-      <div className="mt-8 flex items-center gap-6 text-gray-500">
-        <div className="flex items-center gap-2">
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-            />
-          </svg>
-          <span className="text-xs">SSL Secured</span>
+                    <div className="text-center mb-6 pt-2">
+                      <div 
+                        className="text-5xl font-bold mb-2"
+                        style={{
+                          background: isPopular 
+                            ? 'linear-gradient(180deg, #fff 0%, #e879f9 100%)'
+                            : 'linear-gradient(180deg, #fff 0%, #a1a1aa 100%)',
+                          WebkitBackgroundClip: 'text',
+                          WebkitTextFillColor: 'transparent',
+                        }}
+                      >
+                        ${pkg.price}
+                      </div>
+                      <div className="text-gray-500 text-sm">one-time payment</div>
+                    </div>
+
+                    <div className="space-y-4 mb-8">
+                      <div className="flex items-center gap-3">
+                        <CheckIcon className={isPopular ? "text-pink-400" : "text-gray-500"} />
+                        <span className="text-gray-300">{pkg.credits} credits</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <CheckIcon className={isPopular ? "text-pink-400" : "text-gray-500"} />
+                        <span className="text-gray-300">{pkg.swaps} face swaps</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <CheckIcon className={isPopular ? "text-pink-400" : "text-gray-500"} />
+                        <span className="text-gray-300">Never expires</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <CheckIcon className={isPopular ? "text-pink-400" : "text-gray-500"} />
+                        <span className="text-gray-300">HD quality</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handlePurchaseCredits(index)}
+                      disabled={isLoading !== null}
+                      className="w-full py-4 rounded-2xl font-semibold text-white transition-all duration-300 disabled:opacity-50"
+                      style={{
+                        background: isPopular
+                          ? 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)'
+                          : 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+                        border: isPopular ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                        boxShadow: isPopular ? '0 8px 30px rgba(168, 85, 247, 0.4)' : 'none',
+                      }}
+                    >
+                      {isLoading === index ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          Processing...
+                        </span>
+                      ) : (
+                        "Buy Now"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+
+        {/* ==================== SUBSCRIPTION PLANS ==================== */}
+        <div className="mb-16">
+          <div className="text-center mb-10">
+            <h2 className="text-2xl md:text-3xl font-semibold text-white mb-4">
+              Subscription Plans
+            </h2>
+            
+            {/* Billing Toggle */}
+            <div className="inline-flex items-center gap-3 p-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.05)' }}>
+              <button
+                onClick={() => setBillingPeriod("monthly")}
+                className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${
+                  billingPeriod === "monthly"
+                    ? "text-white"
+                    : "text-gray-400 hover:text-white"
+                }`}
+                style={billingPeriod === "monthly" ? {
+                  background: 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)',
+                  boxShadow: '0 4px 15px rgba(168, 85, 247, 0.3)',
+                } : {}}
+              >
+                Monthly
+              </button>
+              <button
+                onClick={() => setBillingPeriod("yearly")}
+                className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${
+                  billingPeriod === "yearly"
+                    ? "text-white"
+                    : "text-gray-400 hover:text-white"
+                }`}
+                style={billingPeriod === "yearly" ? {
+                  background: 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)',
+                  boxShadow: '0 4px 15px rgba(168, 85, 247, 0.3)',
+                } : {}}
+              >
+                Yearly
+              </button>
+              <span className="text-sm text-gray-400 ml-2">
+                Save up to 20% by paying yearly
+              </span>
+            </div>
+          </div>
+
+          {/* Plan Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+            {plans.map((plan) => (
+              <div
+                key={plan.id}
+                className={`relative rounded-3xl p-[1px] transition-all duration-300 hover:scale-[1.02] ${
+                  plan.popular ? "md:-mt-4 md:mb-4" : ""
+                }`}
+                style={{
+                  background: plan.popular 
+                    ? 'linear-gradient(180deg, rgba(168, 85, 247, 0.6) 0%, rgba(236, 72, 153, 0.4) 100%)'
+                    : 'linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%)',
+                }}
+              >
+                <div 
+                  className="rounded-3xl p-6 h-full relative overflow-hidden"
+                  style={{
+                    background: plan.popular
+                      ? 'linear-gradient(180deg, rgba(35, 20, 60, 0.95) 0%, rgba(20, 12, 35, 0.98) 100%)'
+                      : 'linear-gradient(180deg, rgba(20, 18, 35, 0.9) 0%, rgba(12, 10, 20, 0.95) 100%)',
+                    boxShadow: plan.popular 
+                      ? '0 25px 80px rgba(168, 85, 247, 0.25), inset 0 1px 0 rgba(255,255,255,0.1)'
+                      : '0 10px 40px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.03)',
+                  }}
+                >
+                  {/* Glow effect for popular */}
+                  {plan.popular && (
+                    <div 
+                      className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-40 rounded-full blur-[80px] opacity-30 pointer-events-none"
+                      style={{ background: '#a855f7' }}
+                    />
+                  )}
+                  
+                  {/* Popular Badge */}
+                  {plan.popular && (
+                    <div 
+                      className="absolute -top-3 left-1/2 -translate-x-1/2 px-5 py-1.5 rounded-full text-xs font-semibold text-white z-10"
+                      style={{
+                        background: 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)',
+                        boxShadow: '0 4px 20px rgba(168, 85, 247, 0.5)',
+                      }}
+                    >
+                      Popular Plan
+                    </div>
+                  )}
+
+                  <div className="relative z-10">
+                    <div className="text-sm text-gray-400 mb-3">{plan.name}</div>
+
+                    <div className="mb-2">
+                      <span 
+                        className="text-5xl font-bold"
+                        style={{
+                          background: plan.popular 
+                            ? 'linear-gradient(180deg, #fff 0%, #f0abfc 100%)'
+                            : 'linear-gradient(180deg, #fff 0%, #a1a1aa 100%)',
+                          WebkitBackgroundClip: 'text',
+                          WebkitTextFillColor: 'transparent',
+                        }}
+                      >
+                        ${plan.price}
+                      </span>
+                      <span className="text-gray-500">
+                        /{billingPeriod === "monthly" ? "month" : "year"}
+                      </span>
+                    </div>
+                    
+                    {"monthlyEquivalent" in plan && billingPeriod === "yearly" && (
+                      <div className="text-sm text-gray-500 mb-4">
+                        ${plan.monthlyEquivalent}/month
+                      </div>
+                    )}
+
+                    <p className="text-gray-400 text-sm mb-6">{plan.description}</p>
+
+                    <div className="space-y-3 mb-8">
+                      {plan.features.map((feature, idx) => (
+                        <div key={idx} className="flex items-center gap-3">
+                          <CheckIcon className={plan.popular ? "text-pink-400" : "text-gray-500"} />
+                          <span className="text-gray-300 text-sm">
+                            {feature.bold ? (
+                              <><strong className="text-white">{feature.text}</strong>{feature.suffix}</>
+                            ) : (
+                              feature.text
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => handleSubscribe()}
+                      className="w-full py-4 rounded-2xl font-semibold text-white transition-all duration-300"
+                      style={{
+                        background: plan.popular
+                          ? 'linear-gradient(90deg, #a855f7 0%, #ec4899 100%)'
+                          : 'linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)',
+                        border: plan.popular ? 'none' : '1px solid rgba(255,255,255,0.08)',
+                        boxShadow: plan.popular ? '0 8px 30px rgba(168, 85, 247, 0.4)' : 'none',
+                      }}
+                    >
+                      {plan.popular ? "Start 7-days Free Trial" : "Start Free Trial"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {/* View Full Plan Comparison Link */}
+          <div className="text-center mt-8">
+            <a href="#" className="inline-flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm">
+              View Full Plan Comparison
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </a>
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div 
+            className="max-w-md mx-auto mb-8 p-4 rounded-2xl text-center"
+            style={{
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+            }}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-            />
-          </svg>
-          <span className="text-xs">Safe & Private</span>
+            <p className="text-red-400">{error}</p>
+          </div>
+        )}
+
+        {/* Free Tier Warning */}
+        <div 
+          className="max-w-3xl mx-auto p-5 rounded-2xl mb-12"
+          style={{
+            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(234, 88, 12, 0.1) 100%)',
+            border: '1px solid rgba(245, 158, 11, 0.2)',
+          }}
+        >
+          <div className="flex items-start gap-4">
+            <div 
+              className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+              style={{ background: 'rgba(245, 158, 11, 0.2)' }}
+            >
+              <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div>
+              <p className="font-semibold text-amber-400 mb-1">
+                Free Tier: 16 credits (2 swaps) + 30 days storage
+              </p>
+              <p className="text-amber-400/70 text-sm">
+                Free tier results include watermarks. Purchase credits or subscribe to remove watermarks and store your swaps forever.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Security badges */}
+        <div className="flex flex-wrap items-center justify-center gap-8 text-gray-500">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <span className="text-sm">SSL Secured</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            <span className="text-sm">Safe & Private</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+            </svg>
+            <span className="text-sm">Powered by Stripe</span>
+          </div>
         </div>
       </div>
     </div>
@@ -288,8 +592,11 @@ export default function PayPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="animate-spin w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full" />
+        <div 
+          className="min-h-screen flex items-center justify-center"
+          style={{ background: 'linear-gradient(180deg, #0c0118 0%, #130824 50%, #0a0a14 100%)' }}
+        >
+          <div className="animate-spin w-10 h-10 border-4 border-t-transparent rounded-full" style={{ borderColor: '#a855f7', borderTopColor: 'transparent' }} />
         </div>
       }
     >
@@ -297,4 +604,3 @@ export default function PayPage() {
     </Suspense>
   );
 }
-

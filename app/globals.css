@@ -5,6 +5,7 @@
 :root {
   --background: #000000;
   --foreground: #ffffff;
+  --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -17,15 +18,25 @@
 body {
   color: var(--foreground);
   background: var(--background);
+  font-family: var(--font-sans);
 }
 
-/* Titres utilisent Stack Sans Notch par défaut */
-h1, h2, h3, h4, h5, h6 {
-  font-family: "Stack Sans Notch", sans-serif;
+/* Headings */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-sans);
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  .font-sans {
+    font-family: var(--font-sans);
   }
 }

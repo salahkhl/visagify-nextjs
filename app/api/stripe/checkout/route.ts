@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripeClient";
 
+// Updated pricing tiers - 8 credits/swap
 const VALID_TIERS = [
-  { credits: 40, price: 4.99 },
-  { credits: 80, price: 7.99 },
-  { credits: 200, price: 14.99 },
-  { credits: 400, price: 24.99 },
+  { credits: 80, price: 4.99 },
+  { credits: 400, price: 19.99 },
+  { credits: 1600, price: 49.99 },
 ];
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { credits, price, returnUrl } = body;
+    const { credits, price, returnUrl, userId } = body;
 
     // Validate the request
     if (!credits || !price) {
@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         credits: credits.toString(),
         return_url: returnUrl || "",
+        user_id: userId || "",
       },
       // Don't collect any billing details to minimize data
       billing_address_collection: "auto",
@@ -76,4 +77,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

@@ -17,17 +17,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="scroll-smooth">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link 
-          href="https://fonts.googleapis.com/css2?family=Stack+Sans+Notch:wght@200..700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap" 
-          rel="stylesheet" 
-        />
-      </head>
-      <body
-        className="bg-black font-sans tracking-tight text-white antialiased"
-      >
+      <body className="bg-black tracking-tight text-white antialiased font-sans">
         <CartProvider>
           <div className="flex min-h-screen flex-col overflow-hidden supports-[overflow:clip]:overflow-clip">
             {children}
