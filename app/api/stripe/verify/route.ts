@@ -1,12 +1,208 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripeClient";
 import { createClient } from "@supabase/supabase-js";
+import Stripe from "stripe";
+import {
+  calculateCreditsToAdd,
+  getPlanConfig,
+  type PlanId,
+} from "@/lib/subscription";
+
+// Result types for verification functions
+interface CreditPurchaseResult {
+  credits: number;
+  userId: string | undefined;
+  email: string | null | undefined;
+}
+
+interface SubscriptionResult extends CreditPurchaseResult {
+  planId: PlanId;
+  isSubscription: true;
+}
 
 // Use service role for credit operations
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+/**
+ * Get user's current credit balance
+ */
+async function getUserCreditBalance(userId: string): Promise<number> {
+  const { data } = await supabaseAdmin
+    .from("user_credits")
+    .select("balance")
+    .eq("user_id", userId)
+    .single();
+
+  return data?.balance || 0;
+}
+
+/**
+ * Set user's credit balance
+ */
+async function setUserCredits(userId: string, newBalance: number) {
+  const { data: existing } = await supabaseAdmin
+    .from("user_credits")
+    .select("balance")
+    .eq("user_id", userId)
+    .single();
+
+  if (existing) {
+    await supabaseAdmin
+      .from("user_credits")
+      .update({
+        balance: newBalance,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId);
+  } else {
+    await supabaseAdmin.from("user_credits").insert({
+      user_id: userId,
+      balance: newBalance,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  }
+}
+
+/**
+ * Handle one-time credit purchase verification
+ */
+async function handleCreditPurchaseVerification(
+  session: Stripe.Checkout.Session,
+  sessionId: string
+): Promise<CreditPurchaseResult> {
+  const credits = parseInt(session.metadata?.credits || "0", 10);
+  const userId = session.metadata?.user_id;
+  const customerEmail = session.customer_details?.email;
+
+  if (credits <= 0) {
+    return { credits: 0, userId, email: customerEmail };
+  }
+
+  // Check if already processed (idempotency)
+  const { data: existingPurchase } = await supabaseAdmin
+    .from("credit_purchases")
+    .select("id")
+    .eq("stripe_session_id", sessionId)
+    .single();
+
+  if (!existingPurchase) {
+    console.log(`Verify: Processing credit purchase for session ${sessionId}`);
+
+    try {
+      // Store the purchase record
+      await supabaseAdmin.from("credit_purchases").insert({
+        stripe_session_id: sessionId,
+        stripe_payment_intent: session.payment_intent as string,
+        email: customerEmail,
+        user_id: userId || null,
+        credits_purchased: credits,
+        amount_paid: session.amount_total ? session.amount_total / 100 : 0,
+        currency: session.currency,
+        status: "completed",
+        metadata: {
+          return_url: session.metadata?.return_url,
+          processed_by: "verify_route",
+        },
+      });
+
+      // Add credits to user's balance
+      if (userId) {
+        const currentBalance = await getUserCreditBalance(userId);
+        const newBalance = currentBalance + credits;
+        await setUserCredits(userId, newBalance);
+        console.log(
+          `Verify: Added ${credits} credits to user ${userId}. New balance: ${newBalance}`
+        );
+      }
+    } catch (dbError) {
+      console.error("Verify: DB error for credit purchase:", dbError);
+    }
+  } else {
+    console.log(`Verify: Session ${sessionId} already processed`);
+  }
+
+  return { credits, userId, email: customerEmail };
+}
+
+/**
+ * Handle subscription verification - apply top-up credits
+ */
+async function handleSubscriptionVerification(
+  session: Stripe.Checkout.Session,
+  sessionId: string
+): Promise<SubscriptionResult> {
+  const planId = (session.metadata?.plan_id || "basic") as PlanId;
+  const userId = session.metadata?.user_id;
+  const customerEmail = session.customer_details?.email;
+
+  // Get plan configuration
+  const plan = getPlanConfig(planId);
+
+  // Calculate credits to add
+  let creditsAdded = 0;
+
+  if (userId) {
+    const currentBalance = await getUserCreditBalance(userId);
+    creditsAdded = calculateCreditsToAdd(currentBalance, plan.creditsPerMonth);
+
+    if (creditsAdded > 0) {
+      // Check if we already added credits for this session
+      const { data: creditLog } = await supabaseAdmin
+        .from("credit_purchases")
+        .select("id")
+        .eq("stripe_session_id", sessionId)
+        .single();
+
+      if (!creditLog) {
+        const newBalance = currentBalance + creditsAdded;
+        await setUserCredits(userId, newBalance);
+
+        // Log the credit addition
+        try {
+          await supabaseAdmin.from("credit_purchases").insert({
+            stripe_session_id: sessionId,
+            stripe_payment_intent: session.subscription as string,
+            email: customerEmail,
+            user_id: userId,
+            credits_purchased: creditsAdded,
+            amount_paid: 0, // Trial or first payment
+            currency: session.currency || "usd",
+            status: "completed",
+            metadata: {
+              type: "subscription",
+              plan_id: planId,
+              processed_by: "verify_route",
+            },
+          });
+        } catch {
+          // Ignore duplicate key errors
+        }
+
+        console.log(
+          `Verify: Subscription top-up for user ${userId}. Added ${creditsAdded} credits (${currentBalance} → ${newBalance}). Plan: ${planId}`
+        );
+      } else {
+        console.log(`Verify: Credits already added for session ${sessionId}`);
+      }
+    } else {
+      console.log(
+        `Verify: No top-up needed. User ${userId} has ${await getUserCreditBalance(userId)} credits, plan max: ${plan.creditsPerMonth}`
+      );
+    }
+  }
+
+  return {
+    credits: creditsAdded,
+    userId,
+    email: customerEmail,
+    planId,
+    isSubscription: true,
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,90 +219,27 @@ export async function POST(request: NextRequest) {
     // Retrieve the session from Stripe
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    if (session.payment_status === "paid") {
-      const credits = parseInt(session.metadata?.credits || "0", 10);
-      const userId = session.metadata?.user_id;
-      const customerEmail = session.customer_details?.email;
+    if (session.payment_status === "paid" || session.status === "complete") {
+      // Determine if this is a subscription or one-time purchase
+      const isSubscription = session.mode === "subscription";
 
-      // Check if this session was already processed (idempotency)
-      const { data: existingPurchase } = await supabaseAdmin
-        .from("credit_purchases")
-        .select("id")
-        .eq("stripe_session_id", sessionId)
-        .single();
+      let result;
 
-      // If not already processed, add credits now (fallback for webhook)
-      if (!existingPurchase && credits > 0) {
-        console.log(
-          `Verify route: Processing credits for session ${sessionId}`
-        );
-
-        try {
-          // Store the purchase record
-          await supabaseAdmin.from("credit_purchases").insert({
-            stripe_session_id: sessionId,
-            stripe_payment_intent: session.payment_intent as string,
-            email: customerEmail,
-            user_id: userId || null,
-            credits_purchased: credits,
-            amount_paid: session.amount_total ? session.amount_total / 100 : 0,
-            currency: session.currency,
-            status: "completed",
-            metadata: {
-              return_url: session.metadata?.return_url,
-              processed_by: "verify_route",
-            },
-          });
-
-          // Add credits to user's balance
-          if (userId) {
-            const { data: existingCredits } = await supabaseAdmin
-              .from("user_credits")
-              .select("balance")
-              .eq("user_id", userId)
-              .single();
-
-            if (existingCredits) {
-              const newBalance = (existingCredits.balance || 0) + credits;
-              await supabaseAdmin
-                .from("user_credits")
-                .update({
-                  balance: newBalance,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("user_id", userId);
-
-              console.log(
-                `Verify route: Updated credits for user ${userId}. New balance: ${newBalance}`
-              );
-            } else {
-              await supabaseAdmin.from("user_credits").insert({
-                user_id: userId,
-                balance: credits,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              });
-
-              console.log(
-                `Verify route: Created credits for user ${userId}. Balance: ${credits}`
-              );
-            }
-          } else {
-            console.warn(`Verify route: No user_id for session ${sessionId}`);
-          }
-        } catch (dbError) {
-          console.error("Verify route: DB error:", dbError);
-          // Continue anyway - credits might have been added by webhook
-        }
-      } else if (existingPurchase) {
-        console.log(`Verify route: Session ${sessionId} already processed`);
+      if (isSubscription) {
+        result = await handleSubscriptionVerification(session, sessionId);
+      } else {
+        result = await handleCreditPurchaseVerification(session, sessionId);
       }
 
       return NextResponse.json({
         success: true,
-        credits,
-        email: customerEmail,
-        userId,
+        credits: result.credits,
+        email: result.email,
+        userId: result.userId,
+        isSubscription,
+        planId: isSubscription
+          ? (result as SubscriptionResult).planId
+          : undefined,
       });
     }
 

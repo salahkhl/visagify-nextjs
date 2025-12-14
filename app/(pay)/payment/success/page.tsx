@@ -3,16 +3,26 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 
+interface VerificationResult {
+  credits: number;
+  isSubscription: boolean;
+  planId?: string;
+}
+
 function SuccessContent() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("session_id");
+  const isSubscriptionParam = searchParams.get("type") === "subscription";
   const returnUrl =
     searchParams.get("return") || "https://onlyfaceswap.com/basket";
 
   const [status, setStatus] = useState<"loading" | "success" | "error">(
     "loading"
   );
-  const [credits, setCredits] = useState<number>(0);
+  const [result, setResult] = useState<VerificationResult>({
+    credits: 0,
+    isSubscription: false,
+  });
   const [countdown, setCountdown] = useState(5);
 
   useEffect(() => {
@@ -32,7 +42,11 @@ function SuccessContent() {
         const data = await response.json();
 
         if (response.ok && data.success) {
-          setCredits(data.credits);
+          setResult({
+            credits: data.credits,
+            isSubscription: data.isSubscription || isSubscriptionParam,
+            planId: data.planId,
+          });
           setStatus("success");
 
           // Start countdown
@@ -41,8 +55,7 @@ function SuccessContent() {
               if (prev <= 1) {
                 clearInterval(timer);
                 // Redirect through Visagify which then redirects to OnlyFaceSwap
-                // This adds an extra hop to avoid Stripe seeing OnlyFaceSwap as referrer
-                window.location.href = `/payment/redirect?to=${encodeURIComponent(returnUrl)}&credits=${data.credits}`;
+                window.location.href = `/payment/redirect?to=${encodeURIComponent(returnUrl)}&credits=${data.credits}&subscription=${data.isSubscription ? "1" : "0"}`;
                 return 0;
               }
               return prev - 1;
@@ -60,7 +73,7 @@ function SuccessContent() {
     };
 
     verifyPayment();
-  }, [sessionId, returnUrl]);
+  }, [sessionId, returnUrl, isSubscriptionParam]);
 
   if (status === "loading") {
     return (
@@ -105,6 +118,19 @@ function SuccessContent() {
     );
   }
 
+  const getPlanDisplayName = (planId?: string) => {
+    switch (planId) {
+      case "basic":
+        return "Basic Plan";
+      case "pro":
+        return "Popular Plan";
+      case "ultra":
+        return "Pro Plan";
+      default:
+        return "Subscription";
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       {/* Success animation */}
@@ -125,13 +151,43 @@ function SuccessContent() {
       </div>
 
       <h1 className="text-3xl font-bold text-white mb-2">
-        Payment Successful!
+        {result.isSubscription
+          ? "Subscription Activated!"
+          : "Payment Successful!"}
       </h1>
 
       <p className="text-gray-400 mb-6 text-center">
-        <span className="text-purple-400 font-bold">{credits} credits</span>{" "}
-        have been added to your account
+        {result.isSubscription ? (
+          <>
+            Your{" "}
+            <span className="text-purple-400 font-bold">
+              {getPlanDisplayName(result.planId)}
+            </span>{" "}
+            is now active!
+            <br />
+            <span className="text-purple-400 font-bold">
+              {result.credits} credits
+            </span>{" "}
+            have been added to your account.
+          </>
+        ) : (
+          <>
+            <span className="text-purple-400 font-bold">
+              {result.credits} credits
+            </span>{" "}
+            have been added to your account
+          </>
+        )}
       </p>
+
+      {/* Trial info for subscriptions */}
+      {result.isSubscription && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 mb-6 text-center">
+          <p className="text-emerald-400 text-sm">
+            🎉 Your 7-day free trial has started!
+          </p>
+        </div>
+      )}
 
       {/* Countdown */}
       <div className="flex items-center gap-2 text-gray-400 mb-8">
@@ -152,7 +208,7 @@ function SuccessContent() {
       </div>
 
       <a
-        href={`/payment/redirect?to=${encodeURIComponent(returnUrl)}&credits=${credits}`}
+        href={`/payment/redirect?to=${encodeURIComponent(returnUrl)}&credits=${result.credits}&subscription=${result.isSubscription ? "1" : "0"}`}
         className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg text-white font-bold transition-all shadow-lg shadow-purple-500/25"
       >
         Continue Now
@@ -174,10 +230,3 @@ export default function SuccessPage() {
     </Suspense>
   );
 }
-
-
-
-
-
-
-
