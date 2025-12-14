@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripeClient";
 import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
+import {
+  calculateCreditsToAdd,
+  getPlanConfig,
+  type PlanId,
+} from "@/lib/subscription";
 
 // Use service role for webhook operations
 const supabaseAdmin = createClient(
@@ -9,20 +14,34 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Helper to add credits to a user
-async function addCreditsToUser(
-  userId: string,
-  credits: number,
-  source: string
-) {
-  const { data: existingCredits } = await supabaseAdmin
+/**
+ * Get user's current credit balance
+ */
+async function getUserCreditBalance(userId: string): Promise<number> {
+  const { data } = await supabaseAdmin
     .from("user_credits")
     .select("balance")
     .eq("user_id", userId)
     .single();
 
-  if (existingCredits) {
-    const newBalance = (existingCredits.balance || 0) + credits;
+  return data?.balance || 0;
+}
+
+/**
+ * Set user's credit balance to a specific value
+ */
+async function setUserCredits(
+  userId: string,
+  newBalance: number,
+  source: string
+) {
+  const { data: existing } = await supabaseAdmin
+    .from("user_credits")
+    .select("balance")
+    .eq("user_id", userId)
+    .single();
+
+  if (existing) {
     await supabaseAdmin
       .from("user_credits")
       .update({
@@ -32,18 +51,60 @@ async function addCreditsToUser(
       .eq("user_id", userId);
 
     console.log(
-      `[${source}] Credits updated: ${credits} added to user ${userId}. New balance: ${newBalance}`
+      `[${source}] Credits set to ${newBalance} for user ${userId} (was ${existing.balance})`
     );
   } else {
     await supabaseAdmin.from("user_credits").insert({
       user_id: userId,
-      balance: credits,
+      balance: newBalance,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
 
     console.log(
-      `[${source}] Credits created: ${credits} credits for new user ${userId}`
+      `[${source}] Credits created: ${newBalance} for user ${userId}`
+    );
+  }
+}
+
+/**
+ * Add credits to user (for one-time purchases)
+ */
+async function addCreditsToUser(
+  userId: string,
+  credits: number,
+  source: string
+) {
+  const currentBalance = await getUserCreditBalance(userId);
+  const newBalance = currentBalance + credits;
+  await setUserCredits(userId, newBalance, source);
+}
+
+/**
+ * Apply top-up credits logic for subscriptions
+ * Credits are topped up to the plan's maximum, not added on top
+ */
+async function topUpCreditsForSubscription(
+  userId: string,
+  planId: PlanId,
+  source: string
+) {
+  const plan = getPlanConfig(planId);
+  const currentBalance = await getUserCreditBalance(userId);
+  const creditsToAdd = calculateCreditsToAdd(
+    currentBalance,
+    plan.creditsPerMonth
+  );
+
+  if (creditsToAdd > 0) {
+    const newBalance = currentBalance + creditsToAdd;
+    await setUserCredits(userId, newBalance, source);
+    console.log(
+      `[${source}] Top-up applied: ${creditsToAdd} credits added (${currentBalance} → ${newBalance}, max: ${plan.creditsPerMonth})`
+    );
+  } else {
+    console.log(
+      `[${source}] No top-up needed: user has ${currentBalance} credits (max: ${plan.creditsPerMonth})`
     );
   }
 }
@@ -73,6 +134,7 @@ async function handleCreditPurchase(session: Stripe.Checkout.Session) {
     });
 
     if (userId) {
+      // One-time purchases ADD credits (don't use top-up logic)
       await addCreditsToUser(userId, credits, "credit_purchase");
     } else {
       console.warn(
@@ -88,15 +150,34 @@ async function handleCreditPurchase(session: Stripe.Checkout.Session) {
   }
 }
 
-// Handle new subscription creation
+// Handle subscription checkout completed - this is when we credit the user
+async function handleSubscriptionCheckout(session: Stripe.Checkout.Session) {
+  const userId = session.metadata?.user_id;
+  const planId = (session.metadata?.plan_id || "basic") as PlanId;
+  const billingPeriod = session.metadata?.billing_period;
+  const customerEmail = session.customer_details?.email;
+
+  console.log(
+    `Subscription checkout completed: ${planId} (${billingPeriod}) for ${customerEmail}`
+  );
+
+  // Credit the user immediately upon successful checkout
+  // Note: Trial users also get credits immediately to use during trial
+  if (userId) {
+    await topUpCreditsForSubscription(
+      userId,
+      planId,
+      "subscription_checkout_completed"
+    );
+  }
+}
+
+// Handle new subscription creation (stores the record)
 async function handleSubscriptionCreated(subscription: Stripe.Subscription) {
   const userId = subscription.metadata?.user_id;
-  const planId = subscription.metadata?.plan_id;
+  const planId = (subscription.metadata?.plan_id || "basic") as PlanId;
   const billingPeriod = subscription.metadata?.billing_period;
-  const creditsPerMonth = parseInt(
-    subscription.metadata?.credits_per_month || "0",
-    10
-  );
+  const plan = getPlanConfig(planId);
   const customerId = subscription.customer as string;
 
   try {
@@ -104,7 +185,7 @@ async function handleSubscriptionCreated(subscription: Stripe.Subscription) {
     const customer = await stripe.customers.retrieve(customerId);
     const customerEmail = (customer as Stripe.Customer).email;
 
-    // Store subscription record
+    // Store subscription record with storage quota
     await supabaseAdmin.from("subscriptions").upsert(
       {
         stripe_subscription_id: subscription.id,
@@ -113,7 +194,8 @@ async function handleSubscriptionCreated(subscription: Stripe.Subscription) {
         email: customerEmail,
         plan_id: planId,
         billing_period: billingPeriod,
-        credits_per_month: creditsPerMonth,
+        credits_per_month: plan.creditsPerMonth,
+        storage_included_mb: plan.storageIncludedMB,
         status: subscription.status,
         current_period_start: new Date(
           subscription.current_period_start * 1000
@@ -133,14 +215,8 @@ async function handleSubscriptionCreated(subscription: Stripe.Subscription) {
       }
     );
 
-    // Add credits to user if subscription is active (not in trial)
-    // For trial, credits will be added when the subscription becomes active
-    if (userId && subscription.status === "active" && creditsPerMonth > 0) {
-      await addCreditsToUser(userId, creditsPerMonth, "subscription_created");
-    }
-
     console.log(
-      `Subscription created: ${planId} (${billingPeriod}) for ${customerEmail} (user: ${userId || "unknown"})`
+      `Subscription record created: ${planId} (${billingPeriod}) for ${customerEmail} (user: ${userId || "unknown"})`
     );
   } catch (dbError) {
     console.error("Error processing subscription creation:", dbError);
@@ -150,12 +226,9 @@ async function handleSubscriptionCreated(subscription: Stripe.Subscription) {
 // Handle subscription updates (renewal, plan changes, etc.)
 async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
   const userId = subscription.metadata?.user_id;
-  const planId = subscription.metadata?.plan_id;
+  const planId = (subscription.metadata?.plan_id || "basic") as PlanId;
   const billingPeriod = subscription.metadata?.billing_period;
-  const creditsPerMonth = parseInt(
-    subscription.metadata?.credits_per_month || "0",
-    10
-  );
+  const plan = getPlanConfig(planId);
   const customerId = subscription.customer as string;
 
   try {
@@ -172,7 +245,8 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
         email: customerEmail,
         plan_id: planId,
         billing_period: billingPeriod,
-        credits_per_month: creditsPerMonth,
+        credits_per_month: plan.creditsPerMonth,
+        storage_included_mb: plan.storageIncludedMB,
         status: subscription.status,
         current_period_start: new Date(
           subscription.current_period_start * 1000
@@ -210,26 +284,37 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
     // Get the subscription to access metadata
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
     const userId = subscription.metadata?.user_id;
-    const creditsPerMonth = parseInt(
-      subscription.metadata?.credits_per_month || "0",
-      10
-    );
+    const planId = (subscription.metadata?.plan_id || "basic") as PlanId;
 
-    // Don't add credits for trial period invoices (amount = 0)
+    // Check if this is the first invoice (initial subscription) or a renewal
+    // billing_reason: 'subscription_create' for first invoice, 'subscription_cycle' for renewals
+    const isRenewal = invoice.billing_reason === "subscription_cycle";
+
+    // For trial invoices (amount = 0), don't add credits
+    // Credits were already added at checkout
     if (invoice.amount_paid === 0) {
       console.log(
-        `Trial invoice paid for subscription ${subscriptionId} - no credits added`
+        `Trial/free invoice for subscription ${subscriptionId} - no credits added (amount_paid = 0)`
       );
       return;
     }
 
-    // Add monthly credits to user
-    if (userId && creditsPerMonth > 0) {
-      await addCreditsToUser(userId, creditsPerMonth, "invoice_paid");
+    // For the first invoice, credits were already added at checkout.session.completed
+    // Only add credits on renewals
+    if (!isRenewal) {
+      console.log(
+        `Initial subscription invoice ${invoice.id} - credits already added at checkout`
+      );
+      return;
+    }
+
+    // Apply top-up credits for renewal
+    if (userId) {
+      await topUpCreditsForSubscription(userId, planId, "subscription_renewal");
     }
 
     console.log(
-      `Invoice paid: ${creditsPerMonth} credits added for subscription ${subscriptionId}`
+      `Subscription renewal processed: ${planId} for subscription ${subscriptionId}`
     );
   } catch (dbError) {
     console.error("Error processing invoice payment:", dbError);
@@ -243,6 +328,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       .from("subscriptions")
       .update({
         status: "canceled",
+        canceled_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq("stripe_subscription_id", subscription.id);
@@ -280,15 +366,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  console.log(`Stripe webhook received: ${event.type}`);
+
   // Handle the event
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
 
-      // Check if this is a subscription or one-time payment
       if (session.mode === "subscription") {
-        // Subscription is handled by customer.subscription.created event
-        console.log(`Subscription checkout completed: ${session.id}`);
+        // Subscription checkout - credit user immediately
+        await handleSubscriptionCheckout(session);
       } else {
         // One-time credit purchase
         await handleCreditPurchase(session);

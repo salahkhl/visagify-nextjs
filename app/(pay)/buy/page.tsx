@@ -12,7 +12,7 @@ const CREDIT_PACKAGES = [
   { credits: 1600, price: 49.99, swaps: 200 },
 ];
 
-// Subscription plans
+// Subscription plans - matching SUBSCRIPTION_AND_STORAGE_LOGIC.md
 const SUBSCRIPTION_PLANS = {
   monthly: [
     {
@@ -23,9 +23,9 @@ const SUBSCRIPTION_PLANS = {
       features: [
         { text: "320 credits/month", bold: false },
         { text: "40", bold: true, suffix: " swaps" },
-        { text: "10GB storage", bold: false },
+        { text: "250 MB", bold: true, suffix: " storage" },
         { text: "HD quality exports", bold: false },
-        { text: "Email support first 30 days", bold: true },
+        { text: "Email support first 30 days", bold: false },
       ],
       popular: false,
     },
@@ -37,9 +37,9 @@ const SUBSCRIPTION_PLANS = {
       features: [
         { text: "1,800 credits/month", bold: false },
         { text: "225", bold: true, suffix: " swaps" },
-        { text: "25GB storage", bold: false },
-        { text: "4K quality exports", bold: false },
-        { text: "Email support 24/7", bold: true, suffix: " priority" },
+        { text: "1 GB", bold: true, suffix: " storage" },
+        { text: "HD quality exports", bold: false },
+        { text: "Priority support 24/7", bold: true },
       ],
       popular: true,
     },
@@ -49,11 +49,11 @@ const SUBSCRIPTION_PLANS = {
       price: 29.99,
       description: "Perfect for power users",
       features: [
-        { text: "Unlimited credits", bold: false },
+        { text: "Unlimited credits", bold: true },
         { text: "Unlimited", bold: true, suffix: " swaps" },
-        { text: "100GB storage", bold: false },
-        { text: "4K quality exports", bold: false },
-        { text: "Email support 24/7", bold: true, suffix: " priority" },
+        { text: "10 GB", bold: true, suffix: " storage" },
+        { text: "HD quality exports", bold: false },
+        { text: "Priority support 24/7", bold: true },
       ],
       popular: false,
     },
@@ -68,9 +68,9 @@ const SUBSCRIPTION_PLANS = {
       features: [
         { text: "320 credits/month", bold: false },
         { text: "40", bold: true, suffix: " swaps" },
-        { text: "10GB storage", bold: false },
+        { text: "250 MB", bold: true, suffix: " storage" },
         { text: "HD quality exports", bold: false },
-        { text: "Email support first 30 days", bold: true },
+        { text: "Email support first 30 days", bold: false },
       ],
       popular: false,
     },
@@ -83,9 +83,9 @@ const SUBSCRIPTION_PLANS = {
       features: [
         { text: "1,800 credits/month", bold: false },
         { text: "225", bold: true, suffix: " swaps" },
-        { text: "25GB storage", bold: false },
-        { text: "4K quality exports", bold: false },
-        { text: "Email support 24/7", bold: true, suffix: " priority" },
+        { text: "1 GB", bold: true, suffix: " storage" },
+        { text: "HD quality exports", bold: false },
+        { text: "Priority support 24/7", bold: true },
       ],
       popular: true,
     },
@@ -96,11 +96,11 @@ const SUBSCRIPTION_PLANS = {
       monthlyEquivalent: 25.0,
       description: "Perfect for power users",
       features: [
-        { text: "Unlimited credits", bold: false },
+        { text: "Unlimited credits", bold: true },
         { text: "Unlimited", bold: true, suffix: " swaps" },
-        { text: "100GB storage", bold: false },
-        { text: "4K quality exports", bold: false },
-        { text: "Email support 24/7", bold: true, suffix: " priority" },
+        { text: "10 GB", bold: true, suffix: " storage" },
+        { text: "HD quality exports", bold: false },
+        { text: "Priority support 24/7", bold: true },
       ],
       popular: false,
     },

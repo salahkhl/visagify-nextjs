@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripeClient";
+import {
+  getPlanConfig,
+  type PlanId,
+  type BillingPeriod,
+} from "@/lib/subscription";
 
 // Stripe Price IDs for subscription plans
 // These should match the Price IDs from your Stripe Dashboard
-const SUBSCRIPTION_PRICE_IDS = {
+const SUBSCRIPTION_PRICE_IDS: Record<
+  BillingPeriod,
+  Record<Exclude<PlanId, "free">, string>
+> = {
   monthly: {
     basic: process.env.STRIPE_PRICE_BASIC_MONTHLY || "",
     pro: process.env.STRIPE_PRICE_PRO_MONTHLY || "", // Popular Plan in Stripe
@@ -16,16 +24,8 @@ const SUBSCRIPTION_PRICE_IDS = {
   },
 };
 
-// Types
-type BillingPeriod = "monthly" | "yearly";
-type PlanId = "basic" | "pro" | "ultra";
-
-// Credits per plan per month
-const PLAN_CREDITS: Record<PlanId, number> = {
-  basic: 320,
-  pro: 1800,
-  ultra: -1, // Unlimited
-};
+const VALID_PLAN_IDS = ["basic", "pro", "ultra"] as const;
+type SubscribablePlanId = (typeof VALID_PLAN_IDS)[number];
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate plan ID
-    if (!["basic", "pro", "ultra"].includes(planId)) {
+    if (!VALID_PLAN_IDS.includes(planId as SubscribablePlanId)) {
       return NextResponse.json(
         { error: "Invalid plan ID. Must be 'basic', 'pro', or 'ultra'" },
         { status: 400 }
@@ -60,7 +60,10 @@ export async function POST(request: NextRequest) {
 
     // Type-safe access after validation
     const validBillingPeriod = billingPeriod as BillingPeriod;
-    const validPlanId = planId as PlanId;
+    const validPlanId = planId as SubscribablePlanId;
+
+    // Get plan configuration
+    const planConfig = getPlanConfig(validPlanId as PlanId);
 
     // Get the Stripe Price ID
     const priceId = SUBSCRIPTION_PRICE_IDS[validBillingPeriod][validPlanId];
@@ -94,7 +97,8 @@ export async function POST(request: NextRequest) {
       metadata: {
         plan_id: validPlanId,
         billing_period: validBillingPeriod,
-        credits_per_month: PLAN_CREDITS[validPlanId].toString(),
+        credits_per_month: planConfig.creditsPerMonth.toString(),
+        storage_included_mb: planConfig.storageIncludedMB.toString(),
         return_url: returnUrl || "",
         user_id: userId || "",
       },
@@ -102,7 +106,8 @@ export async function POST(request: NextRequest) {
         metadata: {
           plan_id: validPlanId,
           billing_period: validBillingPeriod,
-          credits_per_month: PLAN_CREDITS[validPlanId].toString(),
+          credits_per_month: planConfig.creditsPerMonth.toString(),
+          storage_included_mb: planConfig.storageIncludedMB.toString(),
           user_id: userId || "",
         },
         // 7-day free trial
