@@ -37,8 +37,10 @@ export async function POST(request: NextRequest) {
 
       // If not already processed, add credits now (fallback for webhook)
       if (!existingPurchase && credits > 0) {
-        console.log(`Verify route: Processing credits for session ${sessionId}`);
-        
+        console.log(
+          `Verify route: Processing credits for session ${sessionId}`
+        );
+
         try {
           // Store the purchase record
           await supabaseAdmin.from("credit_purchases").insert({
@@ -73,8 +75,10 @@ export async function POST(request: NextRequest) {
                   updated_at: new Date().toISOString(),
                 })
                 .eq("user_id", userId);
-              
-              console.log(`Verify route: Updated credits for user ${userId}. New balance: ${newBalance}`);
+
+              console.log(
+                `Verify route: Updated credits for user ${userId}. New balance: ${newBalance}`
+              );
             } else {
               await supabaseAdmin.from("user_credits").insert({
                 user_id: userId,
@@ -82,8 +86,10 @@ export async function POST(request: NextRequest) {
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
               });
-              
-              console.log(`Verify route: Created credits for user ${userId}. Balance: ${credits}`);
+
+              console.log(
+                `Verify route: Created credits for user ${userId}. Balance: ${credits}`
+              );
             }
           } else {
             console.warn(`Verify route: No user_id for session ${sessionId}`);
@@ -116,7 +122,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-
-
-
